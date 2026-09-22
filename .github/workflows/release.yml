@@ -21,8 +21,12 @@ jobs:
 
       - name: Install Android build-tools
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SM="$(find "$SDK/cmdline-tools" -name sdkmanager -type f | head -1)"
+          yes | "$SM" --licenses > /dev/null || true
+          "$SM" "platforms;android-34" "build-tools;34.0.0"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "$SDK/build-tools/34.0.0" >> "$GITHUB_PATH"
 
       - name: Install host build deps
         run: sudo apt-get update && sudo apt-get install -y patchelf binutils
