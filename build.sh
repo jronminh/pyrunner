@@ -37,7 +37,7 @@ if [ -z "${ANDROID_JAR:-}" ] || [ ! -f "$ANDROID_JAR" ]; then
     exit 1
 fi
 
-for tool in javac keytool patchelf readelf d8 aapt apksigner "$CC"; do
+for tool in javac keytool patchelf readelf d8 aapt apksigner zipalign "$CC"; do
     command -v "$tool" >/dev/null 2>&1 || { echo "Missing tool: $tool" >&2; exit 1; }
 done
 
@@ -161,12 +161,15 @@ d8 --lib "$ANDROID_JAR" --output "$BUILD" $(find "$BUILD/obj" -name '*.class')
 
 echo "Packaging..."
 aapt package -f -A "$ASSETS" -S "$HERE/res" -M "$HERE/AndroidManifest.xml" \
-    -I "$ANDROID_JAR" -F "$BUILD/app-unsigned.apk"
+    -I "$ANDROID_JAR" -0 arsc -F "$BUILD/app-unsigned.apk"
 cp "$BUILD/app-unsigned.apk" "$BUILD/app-with-dex.apk"
 (cd "$BUILD" && aapt add app-with-dex.apk classes.dex lib/arm64-v8a/libpython3.so lib/arm64-v8a/libpty.so)
 
+echo "Aligning..."
+zipalign -p -f 4 "$BUILD/app-with-dex.apk" "$BUILD/app-aligned.apk"
+
 echo "Signing..."
 apksigner sign --ks "$KEYSTORE" --ks-pass pass:android --key-pass pass:android \
-    --out "$OUT_DIR/pyrunner.apk" "$BUILD/app-with-dex.apk"
+    --out "$OUT_DIR/pyrunner.apk" "$BUILD/app-aligned.apk"
 
 echo "Built: $OUT_DIR/pyrunner.apk"
