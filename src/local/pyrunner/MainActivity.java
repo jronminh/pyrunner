@@ -3,16 +3,21 @@ package local.pyrunner;
 import android.app.Activity;
 import android.content.ContentResolver;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.TypedValue;
+import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -46,15 +51,25 @@ public class MainActivity extends Activity {
     private TextView console;
     private EditText stdinField;
     private volatile Process process;
+    private float textSizeSp = 14f;
+    private ScaleGestureDetector scaleDetector;
+    private SharedPreferences prefs;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        if (savedInstanceState != null) {
-            return;
-        }
         executor = Executors.newSingleThreadExecutor();
         mainHandler = new Handler(Looper.getMainLooper());
+        prefs = getSharedPreferences("pyrunner", MODE_PRIVATE);
+        textSizeSp = prefs.getFloat("text_size", 14f);
+        scaleDetector = new ScaleGestureDetector(this, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            @Override
+            public boolean onScale(ScaleGestureDetector detector) {
+                textSizeSp = Math.max(8f, Math.min(40f, textSizeSp * detector.getScaleFactor()));
+                console.setTextSize(TypedValue.COMPLEX_UNIT_SP, textSizeSp);
+                return true;
+            }
+        });
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -71,10 +86,18 @@ public class MainActivity extends Activity {
         console = new TextView(this);
         console.setTypeface(android.graphics.Typeface.MONOSPACE);
         console.setTextIsSelectable(true);
+        console.setHorizontallyScrolling(true);
+        console.setTextSize(TypedValue.COMPLEX_UNIT_SP, textSizeSp);
         console.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        HorizontalScrollView hScroll = new HorizontalScrollView(this);
+        hScroll.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
-        scrollView.addView(console);
+        hScroll.addView(console);
+        scrollView.addView(hScroll);
 
         LinearLayout inputRow = new LinearLayout(this);
         inputRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -142,6 +165,22 @@ public class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == 42 && resultCode == RESULT_OK && data != null) {
             runScript(data.getData());
+        }
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (scaleDetector != null) {
+            scaleDetector.onTouchEvent(ev);
+        }
+        return super.dispatchTouchEvent(ev);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (prefs != null) {
+            prefs.edit().putFloat("text_size", textSizeSp).apply();
         }
     }
 
