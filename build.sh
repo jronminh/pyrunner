@@ -21,6 +21,7 @@ RUNTIME="$BUILD/runtime"
 
 PREFIX="${PREFIX:?set PREFIX to a Termux prefix containing python}"
 KEYSTORE="${KEYSTORE:-$HERE/debug.keystore}"
+CC="${CC:-clang}"
 
 if [ -z "${ANDROID_JAR:-}" ]; then
     for candidate in \
@@ -36,7 +37,7 @@ if [ -z "${ANDROID_JAR:-}" ] || [ ! -f "$ANDROID_JAR" ]; then
     exit 1
 fi
 
-for tool in javac keytool patchelf readelf d8 aapt apksigner; do
+for tool in javac keytool patchelf readelf d8 aapt apksigner "$CC"; do
     command -v "$tool" >/dev/null 2>&1 || { echo "Missing tool: $tool" >&2; exit 1; }
 done
 
@@ -67,6 +68,16 @@ echo "Staging interpreter..."
 cp "$PY_BIN" "$NATIVE/libpython3.so"
 chmod 755 "$NATIVE/libpython3.so"
 patchelf --set-rpath '$ORIGIN' "$NATIVE/libpython3.so"
+
+echo "Building PTY shim..."
+JNI_H="$(find "$(dirname "$(dirname "$(command -v javac)")")" -name jni.h 2>/dev/null | head -1)"
+if [ -z "$JNI_H" ]; then
+    echo "jni.h not found next to javac" >&2
+    exit 1
+fi
+JNI_INC="$(dirname "$JNI_H")"
+"$CC" -shared -fPIC -O2 -I"$JNI_INC" -I"$JNI_INC/linux" \
+    -o "$NATIVE/libpty.so" "$HERE/jni/pty.c"
 
 echo "Computing shared-lib closure..."
 CLOSURE="$(python3 - "$PREFIX" "$PY_BIN" "$PYVER" "$STDLIB" <<'PY'
@@ -139,7 +150,7 @@ echo "Packaging..."
 aapt package -f -A "$ASSETS" -S "$HERE/res" -M "$HERE/AndroidManifest.xml" \
     -I "$ANDROID_JAR" -F "$BUILD/app-unsigned.apk"
 cp "$BUILD/app-unsigned.apk" "$BUILD/app-with-dex.apk"
-(cd "$BUILD" && aapt add app-with-dex.apk classes.dex lib/arm64-v8a/libpython3.so)
+(cd "$BUILD" && aapt add app-with-dex.apk classes.dex lib/arm64-v8a/libpython3.so lib/arm64-v8a/libpty.so)
 
 echo "Signing..."
 apksigner sign --ks "$KEYSTORE" --ks-pass pass:android --key-pass pass:android \

@@ -24,9 +24,10 @@ jobs:
           SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           SM="$(find "$SDK/cmdline-tools" -name sdkmanager -type f | head -1)"
           yes | "$SM" --licenses > /dev/null || true
-          "$SM" "platforms;android-34" "build-tools;34.0.0"
+          "$SM" "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125"
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
           echo "$SDK/build-tools/34.0.0" >> "$GITHUB_PATH"
+          echo "CC=$SDK/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
 
       - name: Install host build deps
         run: sudo apt-get update && sudo apt-get install -y patchelf binutils

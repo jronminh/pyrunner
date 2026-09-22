@@ -31,6 +31,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.io.Reader;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -50,7 +51,8 @@ public class MainActivity extends Activity {
     private ScrollView scrollView;
     private TextView console;
     private EditText stdinField;
-    private volatile Process process;
+    private volatile Pty pty;
+    private int escState = 0;
     private float textSizeSp = 14f;
     private ScaleGestureDetector scaleDetector;
     private SharedPreferences prefs;
@@ -112,27 +114,25 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 1.0f));
 
+        Button ctrlCBtn = new Button(this);
+        ctrlCBtn.setText("^C");
+        ctrlCBtn.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        ctrlCBtn.setOnClickListener(v -> sendBytes(new byte[]{3}));
+
         Button sendBtn = new Button(this);
         sendBtn.setText("Send");
         sendBtn.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
         sendBtn.setOnClickListener(v -> {
-            String text = stdinField.getText().toString();
-            if (text.length() > 0 && process != null && process.isAlive()) {
-                try {
-                    OutputStream os = process.getOutputStream();
-                    Writer w = new OutputStreamWriter(os, StandardCharsets.UTF_8);
-                    w.write(text + "\n");
-                    w.flush();
-                } catch (IOException e) {
-                    append("stdin write error: " + e.getMessage());
-                }
-            }
+            sendBytes((stdinField.getText().toString() + "\n").getBytes(StandardCharsets.UTF_8));
             stdinField.setText("");
         });
 
         inputRow.addView(stdinField);
+        inputRow.addView(ctrlCBtn);
         inputRow.addView(sendBtn);
 
         root.addView(scrollView);
@@ -202,11 +202,8 @@ public class MainActivity extends Activity {
                 argv.add(py);
                 argv.add("-u");
                 argv.add(scriptFile.getAbsolutePath());
-                ProcessBuilder pb = new ProcessBuilder(argv);
-                pb.directory(getFilesDir());
-                pb.redirectErrorStream(true);
                 File runtimeDir = new File(getFilesDir(), "runtime");
-                java.util.Map<String, String> env = pb.environment();
+                java.util.Map<String, String> env = new java.util.HashMap<>();
                 env.put("PYTHONHOME", runtimeDir.getAbsolutePath());
                 File stdlib = findStdlib(runtimeDir);
                 if (stdlib != null) {
@@ -218,20 +215,27 @@ public class MainActivity extends Activity {
                 env.put("TMPDIR", getCacheDir().getAbsolutePath());
                 env.put("HOME", getFilesDir().getAbsolutePath());
                 env.put("LD_LIBRARY_PATH", runtimeDir.getAbsolutePath() + "/lib");
+                env.put("PATH", ai.nativeLibraryDir);
+                env.put("TERM", "dumb");
                 env.put("LANG", "C.UTF-8");
                 env.put("LC_ALL", "C.UTF-8");
-                process = pb.start();
-                BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    String l = line;
-                    mainHandler.post(() -> {
-                        console.append(l + "\n");
-                        scrollView.fullScroll(View.FOCUS_DOWN);
-                    });
+                String[] envArr = new String[env.size()];
+                int e = 0;
+                for (java.util.Map.Entry<String, String> entry : env.entrySet()) {
+                    envArr[e++] = entry.getKey() + "=" + entry.getValue();
                 }
-                int exitCode = process.waitFor();
-                mainHandler.post(() -> console.append("[exit " + exitCode + "]"));
+
+                Pty started = Pty.start(argv.toArray(new String[0]),
+                        getFilesDir().getAbsolutePath(), envArr, 40, 100);
+                if (started == null) {
+                    append("PyRunner: could not start pty");
+                    return;
+                }
+                pty = started;
+                readPty(started);
+                int exitCode = started.waitFor();
+                pty = null;
+                mainHandler.post(() -> console.append("[exit " + exitCode + "]\n"));
             } catch (Throwable t) {
                 StringBuilder sb = new StringBuilder();
                 for (StackTraceElement e : t.getStackTrace()) {
@@ -241,6 +245,51 @@ public class MainActivity extends Activity {
                 mainHandler.post(() -> console.append(err));
             }
         });
+    }
+
+    private void sendBytes(byte[] bytes) {
+        Pty p = pty;
+        if (p == null) {
+            return;
+        }
+        try {
+            p.out.write(bytes);
+            p.out.flush();
+        } catch (IOException e) {
+            append("input write error: " + e.getMessage());
+        }
+    }
+
+    private void readPty(Pty p) throws IOException {
+        Reader reader = new InputStreamReader(p.in, StandardCharsets.UTF_8);
+        char[] buf = new char[4096];
+        int n;
+        while ((n = reader.read(buf)) > 0) {
+            StringBuilder out = new StringBuilder();
+            for (int i = 0; i < n; i++) {
+                char c = buf[i];
+                if (escState == 0) {
+                    if (c == 0x1b) {
+                        escState = 1;
+                    } else if (c == '\n') {
+                        out.append('\n');
+                    } else if (c != '\r' && c != '\b' && c != 0x07) {
+                        out.append(c);
+                    }
+                } else if (escState == 1) {
+                    escState = (c == '[') ? 2 : 0;
+                } else if (c >= 0x40 && c <= 0x7e) {
+                    escState = 0;
+                }
+            }
+            if (out.length() > 0) {
+                String text = out.toString();
+                mainHandler.post(() -> {
+                    console.append(text);
+                    scrollView.fullScroll(View.FOCUS_DOWN);
+                });
+            }
+        }
     }
 
     private File findStdlib(File runtimeDir) {
