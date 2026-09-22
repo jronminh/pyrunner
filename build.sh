@@ -105,7 +105,7 @@ echo "Converting to dex..."
 d8 --lib "$ANDROID_JAR" --output "$BUILD" $(find "$BUILD/obj" -name '*.class')
 
 echo "Packaging unsigned APK..."
-aapt package -f -A "$ASSETS" -M "$HERE/AndroidManifest.xml" -I "$ANDROID_JAR" -F "$BUILD/app-unsigned.apk"
+aapt package -f -A "$ASSETS" -S "$HERE/res" -M "$HERE/AndroidManifest.xml" -I "$ANDROID_JAR" -F "$BUILD/app-unsigned.apk"
 cp "$BUILD/app-unsigned.apk" "$BUILD/app-with-dex.apk"
 (cd "$BUILD" && aapt add app-with-dex.apk classes.dex lib/arm64-v8a/libpython3.so)
 
