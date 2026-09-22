@@ -2,3 +2,5 @@ build/
 out/
 assets/
 tools/preview_*.png
+*.keystore
+ci-prefix/

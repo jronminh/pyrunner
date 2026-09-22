@@ -1,0 +1,64 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android build-tools
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Install host build deps
+        run: sudo apt-get update && sudo apt-get install -y patchelf binutils
+
+      - name: Fetch Termux aarch64 prefix
+        run: bash ci/fetch-termux-prefix.sh "$RUNNER_TEMP/prefix"
+
+      - name: Restore signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "KEYSTORE=$RUNNER_TEMP/release.keystore" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build APK
+        env:
+          PREFIX: ${{ runner.temp }}/prefix
+        run: |
+          export PATH="$ANDROID_HOME/build-tools/34.0.0:$PATH"
+          export ANDROID_JAR="$ANDROID_HOME/platforms/android-34/android.jar"
+          KEYSTORE="${KEYSTORE:-$RUNNER_TEMP/debug.keystore}" bash build.sh
+
+      - name: Collect artifact
+        run: |
+          mkdir -p dist
+          cp out/pyrunner.apk "dist/pyrunner-${GITHUB_REF_NAME:-dev}.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pyrunner-apk
+          path: dist/*.apk
+
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/*.apk
+          generate_release_notes: true

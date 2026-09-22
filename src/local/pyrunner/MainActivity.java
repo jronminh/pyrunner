@@ -208,7 +208,10 @@ public class MainActivity extends Activity {
                 File runtimeDir = new File(getFilesDir(), "runtime");
                 java.util.Map<String, String> env = pb.environment();
                 env.put("PYTHONHOME", runtimeDir.getAbsolutePath());
-                env.put("PYTHONPATH", runtimeDir.getAbsolutePath() + "/lib/python3.14");
+                File stdlib = findStdlib(runtimeDir);
+                if (stdlib != null) {
+                    env.put("PYTHONPATH", stdlib.getAbsolutePath());
+                }
                 env.put("PYTHONDONTWRITEBYTECODE", "1");
                 env.put("PYTHONUNBUFFERED", "1");
                 env.put("PYTHONIOENCODING", "utf-8");
@@ -240,10 +243,23 @@ public class MainActivity extends Activity {
         });
     }
 
+    private File findStdlib(File runtimeDir) {
+        File[] kids = new File(runtimeDir, "lib").listFiles();
+        if (kids == null) {
+            return null;
+        }
+        for (File k : kids) {
+            if (k.isDirectory() && k.getName().startsWith("python3.")) {
+                return k;
+            }
+        }
+        return null;
+    }
+
     private void ensureRuntime() {
         if (runtimeReady.get()) return;
         File dir = new File(getFilesDir(), "runtime");
-        if (new File(dir, "lib/python3.14").exists()) {
+        if (findStdlib(dir) != null) {
             runtimeReady.set(true);
             return;
         }
