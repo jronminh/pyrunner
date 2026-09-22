@@ -70,9 +70,22 @@ chmod 755 "$NATIVE/libpython3.so"
 patchelf --set-rpath '$ORIGIN' "$NATIVE/libpython3.so"
 
 echo "Building PTY shim..."
-JNI_H="$(find "$(dirname "$(dirname "$(command -v javac)")")" -name jni.h 2>/dev/null | head -1)"
+find_jni_h() {
+    for base in "${JAVA_HOME:-}" \
+                "$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")" \
+                $PREFIX/lib/jvm/* /usr/lib/jvm/*; do
+        [ -n "$base" ] && [ -d "$base" ] || continue
+        hit="$(find -L "$base" -name jni.h 2>/dev/null | head -1)"
+        if [ -n "$hit" ]; then
+            echo "$hit"
+            return 0
+        fi
+    done
+    return 1
+}
+JNI_H="$(find_jni_h || true)"
 if [ -z "$JNI_H" ]; then
-    echo "jni.h not found next to javac" >&2
+    echo "jni.h not found (set JAVA_HOME)" >&2
     exit 1
 fi
 JNI_INC="$(dirname "$JNI_H")"
